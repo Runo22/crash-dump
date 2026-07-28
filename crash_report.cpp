@@ -131,11 +131,16 @@ void write_minidump(const wchar_t* path, const Context& ctx) {
     mei.ExceptionPointers = ctx.exception;
     mei.ClientPointers    = FALSE;
 
-    MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, type,
-                      ctx.exception ? &mei : nullptr, nullptr, nullptr);
+    const BOOL ok = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(),
+                                      file, type, ctx.exception ? &mei : nullptr,
+                                      nullptr, nullptr);
 
     FlushFileBuffers(file);
     CloseHandle(file);
+
+    // A failed dump leaves a truncated file that looks valid; drop it so only
+    // the reliable text log remains rather than a misleading .dmp.
+    if (!ok) DeleteFileW(path);
 }
 
 } // namespace crash::report

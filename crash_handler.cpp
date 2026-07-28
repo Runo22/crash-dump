@@ -19,7 +19,8 @@
 namespace crash {
 namespace {
 
-constexpr size_t kPathMax = 1024;
+constexpr size_t kPathMax         = 1024;
+constexpr DWORD  kWriterTimeoutMs = 120 * 1000;  ///< A large dump legitimately takes seconds.
 
 struct State {
     bool installed = false;
@@ -36,6 +37,7 @@ struct State {
 
     report::Context pending{};  ///< Handed to the writer thread.
     wchar_t         reason[256] = L"";
+    wchar_t         stem[512]   = L"";  ///< Report id, built once and shared by .dmp/.log.
 
     LONG handling = 0;  ///< Reentrancy guard: the first crash wins.
 };
@@ -53,28 +55,27 @@ void build_stem(wchar_t* out) {
 
 /// @brief Best-effort copy to the LAN share; never blocks the local write.
 void mirror(const wchar_t* src, const wchar_t* stem, const wchar_t* ext) {
-    if (!g.mirror_dir[0]) return;
     wchar_t dst[kPathMax];
     wsprintfW(dst, L"%s\\%s%s", g.mirror_dir, stem, ext);
-    CreateDirectoryW(g.mirror_dir, nullptr);
     CopyFileW(src, dst, FALSE);
 }
 
 void produce_report() {
-    wchar_t stem[512];
-    build_stem(stem);
-
     CreateDirectoryW(g.dump_dir, nullptr);
 
     wchar_t dmp[kPathMax], log[kPathMax];
-    wsprintfW(dmp, L"%s\\%s.dmp", g.dump_dir, stem);
-    wsprintfW(log, L"%s\\%s.log", g.dump_dir, stem);
+    wsprintfW(dmp, L"%s\\%s.dmp", g.dump_dir, g.stem);
+    wsprintfW(log, L"%s\\%s.log", g.dump_dir, g.stem);
 
     report::write_text(log, g.pending);  // cheap and near-certain; do it first
     report::write_minidump(dmp, g.pending);
 
-    mirror(log, stem, L".log");
-    mirror(dmp, stem, L".dmp");
+    // Best-effort LAN mirror. Create the share directory once, not once per file.
+    if (g.mirror_dir[0]) {
+        CreateDirectoryW(g.mirror_dir, nullptr);
+        mirror(log, g.stem, L".log");
+        mirror(dmp, g.stem, L".dmp");
+    }
 }
 
 /// @brief Report writer. Its own fresh stack is what keeps stack-overflow
@@ -89,6 +90,7 @@ DWORD WINAPI writer_main(LPVOID) {
 
 /// @brief Fill @ref State::pending for the calling thread.
 void capture_context(EXCEPTION_POINTERS* ep, const wchar_t* reason) {
+    build_stem(g.stem);  // one id, shared by the .dmp, the .log and the returned report id
     if (reason) lstrcpynW(g.reason, reason, 256);
 
     g.pending.app_name    = g.app_name;
@@ -108,8 +110,7 @@ void capture_context(EXCEPTION_POINTERS* ep, const wchar_t* reason) {
 void run_writer() {
     if (g.writer_thread) {
         SetEvent(g.work_ready);
-        // Bounded: a large dump legitimately takes seconds.
-        WaitForSingleObject(g.work_done, 120 * 1000);
+        WaitForSingleObject(g.work_done, kWriterTimeoutMs);  // bounded
     } else {
         produce_report();  // fallback if install() partially failed
     }
@@ -239,21 +240,22 @@ bool install(const Config& cfg) {
 }
 
 std::wstring write_report_now(std::wstring_view reason) {
-    wchar_t stem[512];
-    build_stem(stem);
-
     // Non-fatal path: report, then release the guard so the app keeps running.
-    if (InterlockedCompareExchange(&g.handling, 1, 0) == 0) {
-        capture_context(nullptr, std::wstring(reason).c_str());
-        run_writer();
+    // If a real crash is already being reported, do not race it.
+    if (InterlockedCompareExchange(&g.handling, 1, 0) != 0)
+        return {};
 
-        if (g.pending.thread) {
-            CloseHandle(g.pending.thread);
-            g.pending.thread = nullptr;
-        }
-        InterlockedExchange(&g.handling, 0);
+    capture_context(nullptr, std::wstring(reason).c_str());  // also builds g.stem
+    run_writer();
+
+    std::wstring id = g.stem;  // the id that actually names the files on disk
+
+    if (g.pending.thread) {
+        CloseHandle(g.pending.thread);
+        g.pending.thread = nullptr;
     }
-    return stem;
+    InterlockedExchange(&g.handling, 0);
+    return id;
 }
 
 } // namespace crash
