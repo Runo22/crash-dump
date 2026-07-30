@@ -49,6 +49,7 @@ void narrow(char* dst, int cap, const wchar_t* src) {
 }
 
 void copy_ascii(char* dst, size_t cap, const char* src) {
+    if (cap == 0) return;              // no room even for the terminator
     if (!src) { dst[0] = '\0'; return; }
     size_t n = std::strlen(src);
     if (n > cap - 1) n = cap - 1;
