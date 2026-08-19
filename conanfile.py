@@ -1,4 +1,4 @@
-from conans import ConanFile, CMake
+from conans import ConanFile, CMake, tools
 from conans.errors import ConanInvalidConfiguration
 
 
@@ -16,9 +16,13 @@ class CrashHandlerConan(ConanFile):
             raise ConanInvalidConfiguration("crash_handler is Windows / MSVC only")
 
     def build(self):
-        cmake = CMake(self)
-        cmake.configure()
-        cmake.build()
+        # The classic CMake helper doesn't map compiler=msvc to a generator and
+        # falls back to "MinGW Makefiles". Force Ninja, and bring in the MSVC
+        # environment so cl.exe is on PATH for the Ninja build.
+        cmake = CMake(self, generator="Ninja")
+        with tools.vcvars(self.settings):
+            cmake.configure()
+            cmake.build()
 
     def package(self):
         self.copy("crash_handler.hpp", dst="include")   # only the public header
