@@ -20,6 +20,12 @@ target_include_directories(crash_handler PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(crash_handler PUBLIC cxx_std_17)
 target_link_libraries(crash_handler PUBLIC dbghelp psapi)
 
+# Namespaced alias so consumers link the same name whether they pull this in via
+# add_subdirectory() or via Conan's find_package (which exposes
+# crash_handler::crash_handler). The :: form also fails loudly at configure time
+# on a typo, instead of degrading to a bad -lcrash_handler link error.
+add_library(crash_handler::crash_handler ALIAS crash_handler)
+
 # Ship the .lib with embedded CodeView (/Z7) so a prebuilt crash_handler still
 # resolves its own frames in the consumer's crash reports. Swap out /Zi first to
 # avoid the shared-PDB dependency and a D9025 override warning. Scoped to this
