@@ -39,6 +39,8 @@ struct State {
     wchar_t         reason[256] = L"";
     wchar_t         stem[512]   = L"";  ///< Report id, built once and shared by .dmp/.log.
 
+    bool break_into_debugger = true;  ///< Break into an attached debugger instead of dumping.
+
     LONG handling = 0;  ///< Reentrancy guard: the first crash wins.
 };
 
@@ -127,7 +129,17 @@ void dispatch(EXCEPTION_POINTERS* ep, const wchar_t* reason) {
     run_writer();
 }
 
+/// @brief True when an attached debugger should handle the fault instead of us.
+bool debugger_owns_fault() {
+    return g.break_into_debugger && IsDebuggerPresent();
+}
+
 LONG WINAPI seh_filter(EXCEPTION_POINTERS* ep) {
+    // Hand the fault back to the debugger: it breaks in with live state, and we
+    // write no dump. (With a debugger attached this filter is usually skipped by
+    // the OS anyway; the check keeps the two paths consistent.)
+    if (debugger_owns_fault()) return EXCEPTION_CONTINUE_SEARCH;
+
     dispatch(ep, nullptr);
     // Do not return to the CRT: it would run atexit handlers and destructors
     // over corrupt state, turning one clean report into a second, confusing
@@ -138,6 +150,11 @@ LONG WINAPI seh_filter(EXCEPTION_POINTERS* ep) {
 
 /// @brief Report from a CRT path that has no EXCEPTION_POINTERS.
 void report_synthetic(const wchar_t* reason, DWORD code) {
+    // CRT paths (terminate, abort, pure call, ...) reach us even under a
+    // debugger, unlike SEH. Break in so the fault can be inspected live rather
+    // than dumped and terminated.
+    if (debugger_owns_fault()) { __debugbreak(); return; }
+
     CONTEXT ctx{};
     RtlCaptureContext(&ctx);
 
@@ -207,6 +224,8 @@ bool install(const Config& cfg) {
     lstrcpynW(g.app_name,    cfg.app_name.c_str(),    128);
     lstrcpynW(g.app_version, cfg.app_version.c_str(), 64);
     lstrcpynW(g.log_file,    cfg.log_file.c_str(),    kPathMax);
+
+    g.break_into_debugger = cfg.break_into_debugger;
 
     CreateDirectoryW(g.dump_dir, nullptr);
 

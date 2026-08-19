@@ -44,6 +44,12 @@ struct Config {
     ///       eagerly, or the lines leading up to the crash will still be
     ///       sitting in a buffer.
     std::wstring log_file;
+
+    /// When a debugger is attached, break into it instead of writing a report:
+    /// SEH faults are handed back to the debugger, and CRT paths (terminate,
+    /// abort, pure call, ...) hit a breakpoint so you can inspect live state.
+    /// Set to false to exercise the dump path itself while debugging.
+    bool break_into_debugger = true;
 };
 
 /// @brief Install the crash hooks. Call once, first thing in main().
