@@ -199,6 +199,17 @@ int on_new_failed(size_t) {
     return 0;
 }
 
+/// @brief UTF-8 -> UTF-16 for the narrow overloads. Runs off the crash path.
+std::wstring to_wide(std::string_view s) {
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(),
+                                      static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
+                        w.data(), n);
+    return w;
+}
+
 } // namespace
 
 // --- public API -------------------------------------------------------------
@@ -275,6 +286,19 @@ std::wstring write_report_now(std::wstring_view reason) {
     }
     InterlockedExchange(&g.handling, 0);
     return id;
+}
+
+// --- UTF-8 (std::string) overloads -------------------------------------------
+
+std::wstring from_utf8(std::string_view utf8) { return to_wide(utf8); }
+
+void register_module(std::string_view display_name, void* module_base, const GitInfo& git) {
+    register_module(to_wide(display_name).c_str(), module_base, git);
+}
+
+std::wstring write_report_now(std::string_view reason) {
+    const std::wstring w = to_wide(reason);
+    return write_report_now(std::wstring_view(w));
 }
 
 } // namespace crash

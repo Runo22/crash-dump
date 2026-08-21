@@ -104,4 +104,20 @@ CRASH_API void mark_module_unloaded(void* module_base);
 /// @return Report id (the timestamp stem shared by the .dmp and .log).
 CRASH_API std::wstring write_report_now(std::wstring_view reason);
 
+// --- UTF-8 (std::string) conveniences ----------------------------------------
+// The wide API above is the native form: Windows paths are UTF-16, and storing
+// wide keeps the crash path conversion-free. These take UTF-8 std::string and
+// convert once, at the safe (non-crash) moment -- so a std::string codebase can
+// pass its strings directly.
+
+/// @brief UTF-8 -> UTF-16, e.g. `cfg.app_name = crash::from_utf8(name);`.
+CRASH_API std::wstring from_utf8(std::string_view utf8);
+
+/// @copydoc register_module
+CRASH_API void register_module(std::string_view display_name, void* module_base,
+                               const GitInfo& git);
+
+/// @copydoc write_report_now
+CRASH_API std::wstring write_report_now(std::string_view reason);
+
 } // namespace crash
