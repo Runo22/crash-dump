@@ -10,7 +10,7 @@ class CrashHandlerConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False]}
     default_options = {"shared": False}
-    exports_sources = "CMakeLists.txt", "*.cpp", "*.hpp", "README.md", "USAGE.md"
+    exports_sources = "CMakeLists.txt", "cmake/*", "*.cpp", "*.hpp", "README.md", "USAGE.md"
 
     def validate(self):
         # MSVC intrinsics, dbghelp/psapi and /Z7 make this Windows/MSVC only.
@@ -24,24 +24,27 @@ class CrashHandlerConan(ConanFile):
                 "shared crash_handler requires the dynamic runtime (MD): STL "
                 "types cross the DLL boundary")
 
-    def build(self):
+    def _configure_cmake(self):
         # The classic CMake helper doesn't map compiler=msvc to a generator and
-        # falls back to "MinGW Makefiles". Force Ninja, and bring in the MSVC
-        # environment so cl.exe is on PATH for the Ninja build.
+        # falls back to "MinGW Makefiles". Force Ninja. Pass an explicit ON/OFF --
+        # assigning the option object can serialize wrong and leave the DLL
+        # without its export defines (hence no import .lib).
         cmake = CMake(self, generator="Ninja")
-        # Pass an explicit ON/OFF. Assigning the option object (or relying on its
-        # truthiness) can serialize wrong, leaving BUILD_SHARED_LIBS off so the
-        # DLL never gets its export defines -> no import .lib.
-        shared = str(self.options.shared) == "True"
-        cmake.definitions["BUILD_SHARED_LIBS"] = "ON" if shared else "OFF"
+        cmake.definitions["BUILD_SHARED_LIBS"] = \
+            "ON" if str(self.options.shared) == "True" else "OFF"
+        cmake.configure()
+        return cmake
+
+    def build(self):
         with tools.vcvars(self.settings):
-            cmake.configure()
-            cmake.build()
+            self._configure_cmake().build()
 
     def package(self):
-        self.copy("crash_handler.hpp", dst="include")   # only the public header
-        self.copy("*.lib", dst="lib", keep_path=False)
-        self.copy("*.dll", dst="bin", keep_path=False)  # present only for the shared build
+        # cmake --install lays out include/, lib/, bin/ AND the relocatable
+        # crash_handlerConfig.cmake + crash_handlerTargets.cmake under
+        # lib/cmake/crash_handler.
+        with tools.vcvars(self.settings):
+            self._configure_cmake().install()
 
     def package_id(self):
         # RelWithDebInfo and MinSizeRel use the release CRT (MD), build from the
@@ -52,8 +55,10 @@ class CrashHandlerConan(ConanFile):
             self.info.settings.build_type = "Release"
 
     def package_info(self):
-        self.cpp_info.libs = ["crash_handler"]
-        self.cpp_info.system_libs = ["dbghelp", "psapi"]
-        # Consumers of the DLL need dllimport on the public API.
-        if str(self.options.shared) == "True":
-            self.cpp_info.defines.append("CRASH_HANDLER_SHARED")
+        # Use the config shipped in the package instead of a Conan-generated one,
+        # so a consumer just does find_package(crash_handler CONFIG) and gets the
+        # imported target -- with the DLL location, so $<TARGET_RUNTIME_DLLS>
+        # deploys it. cmake_find_mode "none" keeps Conan from generating a
+        # competing config; builddirs points find_package at ours.
+        self.cpp_info.set_property("cmake_find_mode", "none")
+        self.cpp_info.builddirs = ["lib/cmake/crash_handler"]

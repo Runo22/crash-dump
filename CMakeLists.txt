@@ -18,7 +18,9 @@ add_library(crash_handler
   crash_symbols.cpp  crash_symbols.hpp
 )
 
-target_include_directories(crash_handler PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(crash_handler PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
+  $<INSTALL_INTERFACE:include>)
 target_compile_features(crash_handler PUBLIC cxx_std_17)
 target_link_libraries(crash_handler PUBLIC dbghelp psapi)
 
@@ -56,3 +58,44 @@ endif()
 
 # Only crash_handler.hpp is meant to be included by users; the rest are
 # internal and live in the same directory purely for build simplicity.
+
+# --- install / package config -------------------------------------------------
+# Ships a relocatable crash_handlerConfig.cmake so a consumer just does
+#   find_package(crash_handler CONFIG REQUIRED)
+#   target_link_libraries(app PRIVATE crash_handler::crash_handler)
+# and gets a proper imported target -- including the DLL location, so
+# $<TARGET_RUNTIME_DLLS> deploys it with zero extra wiring.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(CRASH_HANDLER_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/crash_handler)
+
+install(TARGETS crash_handler
+        EXPORT  crash_handlerTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}      # .dll (shared)
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}      # .so  (non-Windows)
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})     # .lib / import lib
+
+install(FILES crash_handler.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# The imported target, namespaced. Its IMPORTED_LOCATION is computed relative to
+# this file at include time, so the package is relocatable.
+install(EXPORT crash_handlerTargets
+        FILE        crash_handlerTargets.cmake
+        NAMESPACE   crash_handler::
+        DESTINATION ${CRASH_HANDLER_INSTALL_CMAKEDIR})
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_LIST_DIR}/cmake/crash_handlerConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/crash_handlerConfig.cmake"
+  INSTALL_DESTINATION ${CRASH_HANDLER_INSTALL_CMAKEDIR})
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/crash_handlerConfigVersion.cmake"
+  VERSION       1.0.0
+  COMPATIBILITY SameMajorVersion)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/crash_handlerConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/crash_handlerConfigVersion.cmake"
+  DESTINATION ${CRASH_HANDLER_INSTALL_CMAKEDIR})

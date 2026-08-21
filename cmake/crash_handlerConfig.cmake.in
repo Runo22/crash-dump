@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+# Pulls in the imported target crash_handler::crash_handler (with its DLL/import
+# lib/include locations, resolved relative to this file so the package can be
+# moved or shipped anywhere).
+include("${CMAKE_CURRENT_LIST_DIR}/crash_handlerTargets.cmake")
+
+check_required_components(crash_handler)
