@@ -11,6 +11,29 @@
 #include <string_view>
 ////////////////////////////////////////////////////////////////////////////////
 
+/// @def CRASH_API
+/// @brief Export/import decoration for the public API.
+///
+/// When crash_handler is built and consumed as a DLL, its registry lives in one
+/// place that both the exe and any shared library call into -- required if a
+/// shared library registers modules or writes reports itself. The build drives
+/// the macro: CRASH_HANDLER_EXPORTS while building the DLL, CRASH_HANDLER_SHARED
+/// in consumers linking it. Neither defined => static build, no decoration.
+///
+/// @note The interface passes std::wstring/std::wstring_view across the boundary,
+///       so a DLL build requires every module (exe, shared libs, this DLL) to use
+///       the SAME MSVC toolset and the DYNAMIC runtime (/MD). With the static
+///       runtime each module has its own heap and this would be unsafe.
+#if defined(_WIN32) && defined(CRASH_HANDLER_SHARED)
+#  if defined(CRASH_HANDLER_EXPORTS)
+#    define CRASH_API __declspec(dllexport)
+#  else
+#    define CRASH_API __declspec(dllimport)
+#  endif
+#else
+#  define CRASH_API
+#endif
+
 namespace crash {
 
 /// @brief Build identity baked into a binary. POD and fixed-size on purpose:
@@ -54,13 +77,13 @@ struct Config {
 
 /// @brief Install the crash hooks. Call once, first thing in main().
 /// @note Not thread safe; nothing else may be running yet.
-bool install(const Config& cfg);
+CRASH_API bool install(const Config& cfg);
 
 /// @brief Give a secondary thread the reserved stack needed to report a stack
 ///        overflow. Call once from each long-lived worker you spawn.
 /// @note install() does this for the main thread only -- the guarantee is
 ///       per-thread.
-void protect_current_thread();
+CRASH_API void protect_current_thread();
 
 /// @brief Record a module so the report can name it and its commit.
 /// @param display_name Short label used in the report, e.g. `radar_plugin`.
@@ -68,17 +91,17 @@ void protect_current_thread();
 /// @note Call from the module handler right after LoadLibrary succeeds.
 ///       Deliberately not queried at crash time: calling GetProcAddress into
 ///       an unloading DLL while handling a fault turns one crash into two.
-void register_module(const wchar_t* display_name, void* module_base, const GitInfo& git);
+CRASH_API void register_module(const wchar_t* display_name, void* module_base, const GitInfo& git);
 
 /// @brief Flag a module as unloaded. Call immediately before FreeLibrary.
 /// @note The record is kept, not erased. A crash caused by a dangling
 ///       callback into an unloaded plugin needs that plugin's identity more
 ///       than any other report does.
-void mark_module_unloaded(void* module_base);
+CRASH_API void mark_module_unloaded(void* module_base);
 
 /// @brief Produce a report without crashing, then continue -- for watchdogs
 ///        and "something is wrong, capture state" paths.
 /// @return Report id (the timestamp stem shared by the .dmp and .log).
-std::wstring write_report_now(std::wstring_view reason);
+CRASH_API std::wstring write_report_now(std::wstring_view reason);
 
 } // namespace crash

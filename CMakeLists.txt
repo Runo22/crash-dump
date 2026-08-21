@@ -6,9 +6,11 @@ if(NOT DEFINED PROJECT_NAME)
   project(crash_handler CXX)
 endif()
 
-# Static library. Link it from the exe only -- plugins do not need it; the
-# module handler registers them on their behalf.
-add_library(crash_handler STATIC
+# Follows BUILD_SHARED_LIBS: STATIC by default (link it into the exe only, which
+# registers plugins on their behalf). Build it SHARED (-DBUILD_SHARED_LIBS=ON)
+# when a separate module -- a shared library -- must call the API itself, so the
+# registry is a single instance shared across the exe and that library.
+add_library(crash_handler
   crash_handler.cpp  crash_handler.hpp
   crash_io.cpp       crash_io.hpp
   crash_modules.cpp  crash_modules.hpp
@@ -19,6 +21,19 @@ add_library(crash_handler STATIC
 target_include_directories(crash_handler PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(crash_handler PUBLIC cxx_std_17)
 target_link_libraries(crash_handler PUBLIC dbghelp psapi)
+
+# DLL boundary: this target exports the API, consumers import it. Keyed directly
+# off BUILD_SHARED_LIBS -- the same switch add_library() used -- so it can never
+# disagree with the target type. Without these defines the DLL exports nothing
+# and MSVC emits no import .lib, which surfaces downstream as
+# "Library 'crash_handler' not found in package". A static build defines neither,
+# leaving the API undecorated.
+if(BUILD_SHARED_LIBS)
+  target_compile_definitions(crash_handler
+    PRIVATE CRASH_HANDLER_EXPORTS
+    PUBLIC  CRASH_HANDLER_SHARED)
+  message(STATUS "crash_handler: shared build -- exporting public API")
+endif()
 
 # Namespaced alias so consumers link the same name whether they pull this in via
 # add_subdirectory() or via Conan's find_package (which exposes
